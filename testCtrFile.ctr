@@ -1,15 +1,18 @@
 {
     "Control": {
-	"Equation":"diffusion",
-	"c":0.5
+	"diffusion_coeff":1,
+	"delta_t":0.01,
+	"time_2":5,
+	"forcing":0.001
     },
 
     "Meshing":{
-	"meshfile":"mesh1.msh",
+	"meshfile":"mesh2.msh",
 	"Dirichlet_functions":["0"],
 	"Dirichlet_boundaries":[0],
 	"Neumann_functions":["0"],
-	"Neumann_boundaries":[1]
+	"Neumann_boundaries":[1],
+	"Initial_conditions":"np.exp(-0.5*((x)**2 + (y)**2))"
     },
 
     "Output": {

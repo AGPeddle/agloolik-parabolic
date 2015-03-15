@@ -1,8 +1,15 @@
 #!/usr/bin/env/ python3
 """
+Implementation of Finite Element method for diffusion-type parabolic problems.
+
+Simplest possible implementation, i.e. linear triangular finite elements,
+forward Euler timestepping.
+
+Dirichlet boundaries don't quite work properly yet unless they're homogeneous.
+
 Author: Adam G. Peddle
 Contact: ap553@exeter.ac.uk
-Version: 0.1
+Version: 1.0
 """
 
 import numpy as np
@@ -34,12 +41,18 @@ class Control(dict):
         with open(controlFileName) as controlFile:
             controlData = json.load(controlFile)
 
-            super(Control,self).__setitem__('Equation',controlData['Control']['Equation'])
-            super(Control,self).__setitem__('c',controlData['Control']['c'])
+            super(Control,self).__setitem__('diffusion_coeff',controlData['Control']['diffusion_coeff'])
+            super(Control,self).__setitem__('delta_t',controlData['Control']['delta_t'])
+            super(Control,self).__setitem__('time_2',controlData['Control']['time_2'])
+            super(Control,self).__setitem__('forcing',controlData['Control']['forcing'])
+            super(Control,self).__setitem__('nTimesteps',\
+                                            int(controlData['Control']['time_2']/\
+                                            controlData['Control']['delta_t']))
 
             super(Control,self).__setitem__('meshFile',controlData['Meshing']['meshfile'])
             super(Control,self).__setitem__('Dirichlet_functions',controlData['Meshing']['Dirichlet_functions'])
             super(Control,self).__setitem__('Neumann_functions',controlData['Meshing']['Neumann_functions'])
+            super(Control,self).__setitem__('Initial_conditions',controlData['Meshing']['Initial_conditions'])
 
             super(Control,self).__setitem__('logLevel',controlData['Output']['loggingLevel'])
             super(Control,self).__setitem__('outFileStem',controlData['Output']['outFileStem'])
@@ -49,13 +62,6 @@ class Control(dict):
             except KeyError:
                  super(Control,self).__setitem__('outSuffix','')
 
-    #def __getitem__(self, name):
-    #    safeFalses = ('outSuffix','c')
-    #    if super(Control, self).__getitem__(name) or name in safeFalses:
-    #        return super(Control, self).__getitem__(name)
-    #    else:
-    #        logging.error("Required parameter '{}' not present in control file".format(name))
-    #        raise AttributeError("Required parameter '{}' not present in control file".format(name))
 
 class Element:
     """
@@ -178,6 +184,22 @@ class Geometry:
                        self.nodes[triangle[2]])
             self.elements.append(Element(corners,triangle))
 
+    def initial_conditions(self, control):
+        """
+        Enforces the initial conditions on the mesh. Requires the control
+        structure to give the equation describing the ICs.
+
+        v1.0 AGP    15 March 2015
+        """
+
+        u = np.zeros((self.nNodes))
+        for n in range(self.nNodes):
+            x = self.nodes[n][0]
+            y = self.nodes[n][1]
+            u[n] = eval(control['Initial_conditions'])
+
+        return u
+
     def assemble_stiffness(self):
         """
         Assembles the stiffness matrix. Calls through to local
@@ -299,63 +321,85 @@ def output(control, geometry, U):
     Logging is not implemented through this function. Rather, this is the post-processing
     phase of the computation.
 
-    v1.0 AGP    28 Feb 2015
+    v1.1 AGP    15 March 2015
     """
-    fig = plt.figure()
-    ax = fig.gca(projection='3d')
-    ax.plot_trisurf(geometry.nodes[:,0],geometry.nodes[:,1],geometry.triangles,U,cmap = cm.coolwarm)
+    plotInterval = int((control['nTimesteps'] + 1)/4)
+    fig = plt.figure(1)
+    ctr = 1
+    for n in range(control['nTimesteps']-1):
+        if n%plotInterval == 0 and ctr < 5:
+            ax = fig.add_subplot(2,2,ctr, projection='3d')
+            ax.plot_trisurf(geometry.nodes[:,0],geometry.nodes[:,1],geometry.triangles,U[:,n],cmap = cm.coolwarm)
+            ctr += 1
+            plt.title('Profile at timestep ' + str(n))
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_zlabel('u')
+            ax.set_zlim3d(0,1)
     plt.show()
+
 
 def main(controlFileName):
     """
     Main function.
 
-    v1.0 AGP    28 Feb 2015
+    v2.0 AGP    15 March 2015
         Calls to initialise, output, and system solution.
+        Significantly different from elliptic-agloolik, on which
+        most of the rest of this code is based.
     """
 
     controlFileName = ''.join(controlFileName)
     control, geometry = initialise(controlFileName)
 
-    LHS = geometry.assemble_stiffness()
-    if control['c'] != 0:
-        LHS += control['c']*geometry.assemble_mass()
+    u = np.zeros((geometry.nNodes,control['nTimesteps']))
+    u[:,0] = geometry.initial_conditions(control)
+    for i in range(geometry.nNodes):
+        if i in geometry.Dirichlet_nodes:
+            u[i,0] = geometry.enforce_Dirichlet(i)
 
-    LHS = np.delete(LHS,geometry.Dirichlet_nodes,axis=0)
-    LHS_shape = np.shape(LHS)
-    Dirichlet_columns = np.zeros(shape=(LHS_shape[0],len(geometry.Dirichlet_nodes)))
-    Dir_col = 0
-    for column in geometry.Dirichlet_nodes:
-        Dirichlet_columns[:,Dir_col] = LHS[:,column]
-        Dir_col += 1
-    LHS = np.delete(LHS,geometry.Dirichlet_nodes,axis=1)
-    logging.info('LHS successfully assembled')
+    logging.info('State initialised')
+
+    W = control['diffusion_coeff']*geometry.assemble_stiffness() #Stiffness matrix
+    M = geometry.assemble_mass() #Mass matrix
+
+    #Eliminate Dirichlet rows/columns:
+    M = np.delete(M,geometry.Dirichlet_nodes,axis=0)
+    M = np.delete(M,geometry.Dirichlet_nodes,axis=1)
+
+    W = np.delete(W,geometry.Dirichlet_nodes,axis=0)
+    W = np.delete(W,geometry.Dirichlet_nodes,axis=1)
+
+    f = geometry.assemble_force()
+    f = np.delete(f,geometry.Dirichlet_nodes)
+    logging.info('Mass and stiffness matrices successfully assembled')
 
     Dirichlet_bcs = np.zeros((len(geometry.Dirichlet_nodes),1))
     for ctr in range(np.size(Dirichlet_bcs)):
         Dirichlet_bcs[ctr,0] = geometry.enforce_Dirichlet(geometry.Dirichlet_nodes[ctr])
 
-    RHS = geometry.assemble_force() + geometry.enforce_Neumann()
-    RHS = np.delete(RHS,geometry.Dirichlet_nodes)
-    RHS = np.reshape(RHS,(-1,1)) #Reshapes RHS into an (n,1) array so it will agree below
-    RHS -= np.dot(Dirichlet_columns,Dirichlet_bcs)
-    logging.info('RHS successfully assembled')
+    #Timestepping begins here:
+    for n in range(control['nTimesteps']-1):
+        start = time.time()
+        uu = np.delete(u[:,n],geometry.Dirichlet_nodes)
+        RHS = np.dot(M - control['delta_t']*W,uu) + control['forcing']*f.reshape(-1)
+        logging.info('RHS successfully assembled for step {:<}'.format(n))
 
-    start = time.time()
-    U = np.linalg.solve(LHS,RHS)
-    end = time.time()
-    logging.info('System solved in {:.8f} seconds'.format(end-start))
-    U_full = np.zeros(geometry.nNodes)
+        U = np.linalg.solve((M + control['delta_t']*W),RHS)
+        end = time.time()
+        logging.info('System solved in {:.8f} seconds'.format(end-start))
 
-    j = 0
-    for i in range(geometry.nNodes):
-        if i not in geometry.Dirichlet_nodes:
-            U_full[i] = U[j]
-            j+=1
-        else:
-            U_full[i] = geometry.enforce_Dirichlet(i)
+        #Put results into appropriate place, computing the
+        #Dirichlet BCs independently
+        j = 0
+        for i in range(geometry.nNodes):
+            if i not in geometry.Dirichlet_nodes:
+                u[i,n+1] = U[j]
+                j+=1
+            else:
+                u[i,n+1] = geometry.enforce_Dirichlet(i)
 
-    output(control, geometry, U_full)
+    output(control, geometry, u)
     logging.info("Computation Completed Successfully!")
 
 if __name__ == "__main__":
@@ -368,5 +412,3 @@ if __name__ == "__main__":
         print("""Control File not found. Please specify the control file.
 Proper calling is: python3 agloolik.py control_file_name.ctr""")
 
-
-"TESTING"

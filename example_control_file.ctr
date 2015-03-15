@@ -1,0 +1,25 @@
+This file is intended to explain the control file. The comments must be removed before the file can be run.
+
+{
+    "Control": {
+	"diffusion_coeff":1, #Diffusion coeffecient
+	"delta_t":0.01,      #Time step to be applied
+	"time_2":5,	     #Time at which to stop computation
+	"forcing":0.001      #Forcing term for inhomogeneous diffusion
+    },
+
+    "Meshing":{
+	"meshfile":"mesh2.msh",      #Name of the file containing the mesh
+	"Dirichlet_functions":["0"], #Description of Dirichlet functions to be applied in numpy form
+	"Dirichlet_boundaries":[0],  #Locations of boundaries which are Dirichlet, corresponding to mesh file
+	"Neumann_functions":["0"],
+	"Neumann_boundaries":[1],
+	"Initial_conditions":"np.exp(-0.5*((x)**2 + (y)**2))" #Valid numpy statement for the initial conditions, using x and y for the coordinates
+    },
+
+    "Output": {
+        "loggingLevel":"INFO", #Set logging level.
+	"outFileStem":"test1", #Name for all output files to begin with
+	"outSuffix":""         #Optional suffix to be placed on the output file
+    }
+}

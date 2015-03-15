@@ -32,7 +32,7 @@ def main():
         return bool(area > max_area)
 
     def refinement2(vertices, area):
-        return(area > 0.5)
+        return(area > 0.25)
 
     info = triangle.MeshInfo()
     info.set_points(points)
